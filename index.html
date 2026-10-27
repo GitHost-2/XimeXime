@@ -125,7 +125,7 @@
   <canvas id="scene" role="img" aria-label="Campo de bloques de noche con estrellas, una luna cuadrada, cuatro gatitos con gorrito y un tornado de cartas."></canvas>
   <div class="vignette" id="vignette"></div>
 
-  <div class="moon-wrap" id="moonWrap"><span class="moon-text" id="moonText">Feliz cumpleaños mi amor</span></div>
+  <div class="moon-wrap" id="moonWrap"><span class="moon-text" id="moonText">Feliz cumple papita</span></div>
 
   <div id="intro">
     <p class="beat wide" id="b1">Jamás pensamos que nuestros caminos se unirían</p>
@@ -771,6 +771,11 @@
         } else if (kind === 'allium') {
           g.fillStyle = '#a24bd8'; g.fillRect(5, 1, 5, 4); g.fillRect(6, 0, 3, 6);
           g.fillStyle = '#d08cff'; g.fillRect(6, 1, 1, 1); g.fillRect(8, 3, 1, 1);
+        } else if (kind === 'glow') {
+          // flor brillosa: petalos blancos que se pintan con el color de cada instancia
+          g.fillStyle = '#dcdcdc'; g.fillRect(5, 3, 5, 3); g.fillRect(6, 2, 3, 5);
+          g.fillStyle = '#ffffff'; g.fillRect(6, 3, 3, 1); g.fillRect(7, 2, 1, 3);
+          g.fillStyle = '#fff6c8'; g.fillRect(7, 4, 1, 1);
         } else {
           g.fillStyle = '#f2f2f2'; g.fillRect(5, 3, 5, 3); g.fillRect(6, 2, 3, 5);
           g.fillStyle = '#f5d33a'; g.fillRect(7, 4, 1, 1);
@@ -782,9 +787,11 @@
       const b = a.clone(); b.rotateY(Math.PI / 2);
       return [a, b];
     }
-    function scatterPlants(tex, count, rMin, rMax, size, tint, seed, filter) {
+    function scatterPlants(tex, count, rMin, rMax, size, tint, seed, filter, glow) {
       const r = rng(seed), g2 = crossPair(size, size);
-      const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide });
+      // las brillosas no reciben luz: se ven encendidas aunque sea de noche
+      const mat = glow ? new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
+        : new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide });
       const meshes = g2.map((g) => { const m = new THREE.InstancedMesh(g, mat, count); m.frustumCulled = false; m.receiveShadow = true; sceneA.add(m); return m; });
       let n = 0, guard = 0;
       while (n < count && guard < count * 6) {
@@ -799,7 +806,10 @@
         if (z < -2 && z > -26 && Math.abs(x) < 10 && r() < 0.7) continue;   // claro hacia el estanque
         const sc = 0.8 + r() * 0.5;
         M.compose(P.set(x, h * B, z), Q.setFromEuler(E.set(0, r() * Math.PI, 0)), S.set(sc, sc, sc));
-        if (tint) C.setRGB(0.75 + r() * 0.3, 0.85 + r() * 0.25, 0.7 + r() * 0.25); else C.setRGB(1, 1, 1);
+        if (glow) {
+          C.copy(glow.cols[(r() * glow.cols.length) | 0]);
+          glow.out.push(x, h * B + size * sc * 0.8, z, C.r, C.g, C.b);
+        } else if (tint) C.setRGB(0.75 + r() * 0.3, 0.85 + r() * 0.25, 0.7 + r() * 0.25); else C.setRGB(1, 1, 1);
         meshes.forEach((m) => { m.setMatrixAt(n, M); m.setColorAt(n, C); });
         n++;
       }
@@ -808,6 +818,12 @@
     scatterPlants(tallGrassTex, 2600, 3, 60, B * 0.95, true, 42);
     scatterPlants(tallGrassTex, 700, 3, 18, B * 0.95, true, 43);
     ['poppy', 'dandelion', 'cornflower', 'allium', 'daisy'].forEach((k, idx) => scatterPlants(flowerTex(k), 90, 3, 45, B * 0.75, false, 51 + idx));
+    // flores brillosas: rosas, lilas, azul cielo y blancas, cada una con su brillito
+    const glowFlowers = { out: [], cols: ['#ff7fbf', '#ffa3d6', '#c79bff', '#9fd8ff', '#fff2c4'].map((c) => new THREE.Color(c)) };
+    scatterPlants(flowerTex('glow'), 260, 2.5, 34, B * 0.7, false, 57, null, glowFlowers);
+    scatterPlants(flowerTex('glow'), 90, 2.5, 12, B * 0.6, false, 58, null, glowFlowers);
+    // un montoncito extra en la parte que se ve de frente
+    scatterPlants(flowerTex('glow'), 240, 3, 30, B * 0.65, false, 59, (i, j) => j < 1 && !SAND[hid(i, j)] && !KIND[hid(i, j)], glowFlowers);
     // canas de azucar en la orilla del estanque
     const caneTex = pixTex(16, (g) => {
       const cols = ['#7fc04a', '#93d45a', '#6aa83c'];
@@ -990,6 +1006,42 @@
     }));
     flies.frustumCulled = false;
     sceneA.add(flies);
+
+    // halo que respira encima de cada flor brillosa
+    const gf = glowFlowers.out, NG = gf.length / 6;
+    const gPos = new Float32Array(NG * 3), gCol = new Float32Array(NG * 3), gPh = new Float32Array(NG);
+    for (let i = 0; i < NG; i++) {
+      gPos.set(gf.slice(i * 6, i * 6 + 3), i * 3);
+      gCol.set(gf.slice(i * 6 + 3, i * 6 + 6), i * 3);
+      gPh[i] = (i * 2.399) % 6.283;
+    }
+    const gGeo = new THREE.BufferGeometry();
+    gGeo.setAttribute('position', new THREE.BufferAttribute(gPos, 3));
+    gGeo.setAttribute('aCol', new THREE.BufferAttribute(gCol, 3));
+    gGeo.setAttribute('aPhase', new THREE.BufferAttribute(gPh, 1));
+    const flowerGlow = new THREE.Points(gGeo, new THREE.ShaderMaterial({
+      uniforms: flyU, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      vertexShader: [
+        'attribute vec3 aCol; attribute float aPhase; uniform float uTime; uniform float uScale; varying vec3 vC; varying float vA;',
+        'void main(){',
+        '  vec4 mv = modelViewMatrix * vec4(position, 1.0);',
+        '  gl_Position = projectionMatrix * mv;',
+        '  gl_PointSize = min(14.0 * uScale * (40.0 / max(1.0, -mv.z)), 34.0 * uScale);',
+        '  vC = aCol; vA = 0.45 + 0.55 * pow(0.5 + 0.5 * sin(uTime * 1.3 + aPhase), 2.0);',
+        '}'
+      ].join('\n'),
+      fragmentShader: [
+        'varying vec3 vC; varying float vA;',
+        'void main(){',
+        '  float d = length(gl_PointCoord - 0.5) * 2.0;',
+        '  float a = pow(max(0.0, 1.0 - d), 2.2) * vA;',
+        '  if (a < 0.01) discard;',
+        '  gl_FragColor = vec4(vC * a * 1.4, a);',
+        '}'
+      ].join('\n')
+    }));
+    flowerGlow.frustumCulled = false;
+    sceneA.add(flowerGlow);
 
     // neblina pegada al suelo (lejos de los gatos)
     const mistMats = [];
@@ -1374,7 +1426,8 @@
       drawPixelHeart(g, w / 2, h / 2 + 4, 13, '#ff6f9f');
     });
     backTex.minFilter = THREE.LinearMipmapLinearFilter;
-    const backMat = new THREE.MeshLambertMaterial({ map: backTex, emissive: 0xffffff, emissiveMap: backTex, emissiveIntensity: 0.52 });
+    // las cartas se dibujan al final (transparent + renderOrder) para que el remolino siempre quede detras
+    const backMat = new THREE.MeshLambertMaterial({ map: backTex, emissive: 0xffffff, emissiveMap: backTex, emissiveIntensity: 0.52, transparent: true });
     // el frente de cada carta: marco rosita tipo polaroid con la foto
     const photoImgs = await Promise.all(PHOTOS.map((ph) => new Promise((res) => {
       const im = new Image();
@@ -1402,14 +1455,15 @@
         drawPixelHeart(g, w / 2, 458, 6, '#ff6f9f');
       });
       tex.minFilter = THREE.LinearMipmapLinearFilter;
-      return new THREE.MeshLambertMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.55 });
+      return new THREE.MeshLambertMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.55, transparent: true });
     });
-    const edgeMat = new THREE.MeshLambertMaterial({ color: 0xf28db6, emissive: 0xf28db6, emissiveIntensity: 0.3 });
+    const edgeMat = new THREE.MeshLambertMaterial({ color: 0xf28db6, emissive: 0xf28db6, emissiveIntensity: 0.3, transparent: true });
     const cardGeo = new THREE.BoxGeometry(1, 1.25, 0.035);
     const cards = [];
     const rk = rng(91);
     for (let k = 0; k < 4; k++) {
       const mesh = new THREE.Mesh(cardGeo, [edgeMat, edgeMat, edgeMat, edgeMat, frontMats[k], backMat]);
+      mesh.renderOrder = 10;
       sceneB.add(mesh);
       cards.push({ mesh: mesh, a0: k * Math.PI / 2 + 0.3, band: 0.2 + 0.2 * k, rest: (rk() - 0.5) * 0.09 });
     }
@@ -1430,7 +1484,7 @@
     sceneB.add(pbPoints);
     const NPP = 70;
     const paperGeo = new THREE.PlaneGeometry(0.14, 0.14);
-    const papers = new THREE.InstancedMesh(paperGeo, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide, emissive: 0x401028 }), NPP);
+    const papers = new THREE.InstancedMesh(paperGeo, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide, emissive: 0x401028, depthWrite: false }), NPP);
     papers.frustumCulled = false;
     const ppData = [], rpp = rng(94);
     for (let i = 0; i < NPP; i++) {
@@ -1512,7 +1566,7 @@
         const r = Rf(u) * 1.1 * grow * d.j * (1 + dis * 2.6);
         pbPos[i * 3] = Math.sin(th) * r;
         pbPos[i * 3 + 1] = L.cyB + (u - 0.5) * hS + dis * (u - 0.3) * 3;
-        pbPos[i * 3 + 2] = -1.2 + Math.cos(th) * r;
+        pbPos[i * 3 + 2] = -1.8 + Math.cos(th) * r;
       }
       pbGeo.attributes.position.needsUpdate = true;
       pbMat.opacity = 0.8 * (1 - dis);
@@ -1523,7 +1577,7 @@
         const th = d.a0 + tau * 2.0 * d.sp * (1 - dis * 0.6);
         const r = Rf(u) * grow * (1 + dis * 3.2);
         M.compose(
-          P.set(Math.sin(th) * r, L.cyB + (u - 0.5) * hS * 0.95 - dis * dis * 3, -1.2 + Math.cos(th) * r),
+          P.set(Math.sin(th) * r, L.cyB + (u - 0.5) * hS * 0.95 - dis * dis * 3, -1.8 + Math.cos(th) * r),
           Q.setFromEuler(E.set(d.rx + tau * 3 * d.sp, d.ry + tau * 2, 0)),
           S.setScalar(Math.max(0.0001, grow * (1 - dis))));
         papers.setMatrixAt(i, M);
@@ -1639,13 +1693,14 @@
       const x1 = pl.x - q1 * w, y1 = pc.y - h / 2;
       // fase 2: sube y se va al centro
       const q2 = span(t, TL.moon2, TL.moon2End);
-      const qy = ease(span(q2, 0, 0.6)), qx = ease(span(q2, 0.3, 1)), qs = ease(q2);
+      // primero sube por encima de la luna y ya luego crece y se centra, asi nunca la pisa
+      const qy = ease(span(q2, 0, 0.5)), qx = ease(span(q2, 0.4, 1)), qs = ease(span(q2, 0.4, 1));
       const s = lerp(1, L.mtScale, qs);
       const x2 = pa.x - w * s / 2, y2 = pa.y - h * s / 2;
       const x = lerp(x1, x2, qx), y = lerp(y1, y2, qy);
       wrap.style.transform = 'translate3d(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px,0) scale(' + s.toFixed(3) + ')';
-      // lo que sigue detras de la luna no se ve
-      const behind = (y + h * s) > toScreen(moonTopW, sp4).y && x + w * s > pl.x;
+      // lo que sigue detras de la luna no se ve, pero solo mientras va saliendo
+      const behind = t < TL.moon1End && x + w * s > pl.x;
       if (behind) {
         const keep = Math.max(0, (pl.x - x) / s);
         wrap.style.clipPath = 'polygon(-80px -80px, ' + keep.toFixed(1) + 'px -80px, ' + keep.toFixed(1) + 'px calc(100% + 80px), -80px calc(100% + 80px))';
